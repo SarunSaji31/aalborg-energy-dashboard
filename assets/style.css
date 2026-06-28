@@ -1,0 +1,141 @@
+/* ============================================================
+   Aalborg DK1 Energy Dashboard — theme
+   Design tokens kept in :root so colours are changed in one place.
+   ============================================================ */
+:root {
+  --bg:        #eef1f5;
+  --card:      #ffffff;
+  --ink:       #1a2230;
+  --muted:     #6b7785;
+  --border:    #e3e8ef;
+  --primary:   #1e6f5c;   /* energy green */
+  --primary-d: #16513f;
+  --accent:    #2f80ed;   /* wind blue */
+  --negative:  #d64545;   /* sub-zero price */
+  --shadow:    0 1px 3px rgba(16, 24, 40, .06), 0 1px 2px rgba(16, 24, 40, .04);
+  --radius:    14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Header ---------- */
+.app-header {
+  background: linear-gradient(120deg, var(--primary-d), var(--primary));
+  color: #fff;
+  padding: 26px 0 30px;
+  box-shadow: var(--shadow);
+}
+.app-header .inner { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+.app-header h1 {
+  margin: 0; font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+  display: flex; align-items: center; gap: 12px;
+}
+.app-header .dot {
+  width: 10px; height: 10px; border-radius: 50%; background: #5ee0a0;
+  box-shadow: 0 0 0 4px rgba(94, 224, 160, .25);
+}
+.app-header p { margin: 8px 0 0; opacity: .85; font-size: .92rem; max-width: 640px; }
+
+/* ---------- Layout shell ---------- */
+.container { max-width: 1120px; margin: -16px auto 48px; padding: 0 24px; }
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+/* ---------- Controls ---------- */
+.controls { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; }
+.control-label {
+  display: block; font-size: .72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); margin-bottom: 8px;
+}
+/* Dash DatePicker tweaks */
+.DateInput_input { font-size: .9rem !important; font-weight: 500 !important; color: var(--ink) !important; }
+.DateRangePickerInput { border-radius: 8px !important; border-color: var(--border) !important; }
+
+/* Resample radio -> segmented control */
+.seg label {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; margin-right: 8px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: .85rem; font-weight: 500; color: var(--ink);
+  transition: all .15s ease;
+}
+.seg label:hover { border-color: var(--primary); }
+.seg input { accent-color: var(--primary); }
+
+/* ---------- KPI cards ---------- */
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;
+}
+.kpi {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px 18px; position: relative; overflow: hidden;
+}
+.kpi::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--primary);
+}
+.kpi.kpi-neg::before { background: var(--negative); }
+.kpi.kpi-wind::before { background: var(--accent); }
+.kpi .kpi-label {
+  font-size: .72rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--muted);
+}
+.kpi .kpi-value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; letter-spacing: -.02em; }
+.kpi .kpi-unit { font-size: .85rem; font-weight: 500; color: var(--muted); margin-left: 4px; }
+
+/* ---------- Daily briefing ---------- */
+.briefing-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.briefing-pin { font-size: 1.2rem; line-height: 1; }
+.briefing-title { font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; }
+.briefing-controls {
+  margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.briefing-controls .SingleDatePickerInput { border-radius: 8px !important; border-color: var(--border) !important; }
+.briefing-controls .DateInput_input { font-size: .85rem !important; font-weight: 500 !important; color: var(--ink) !important; padding: 6px 10px !important; }
+.briefing-controls .SingleDatePicker_picker { z-index: 20; }
+.briefing .kpi-grid { margin-bottom: 8px; }
+
+.briefing-chart { margin: 2px 0 2px; }
+.briefing-caption {
+  font-size: .86rem; color: var(--muted); line-height: 1.5;
+  padding: 4px 4px 2px;
+}
+.briefing-caption .lg { font-weight: 700; }
+.briefing-caption .lg-green { color: var(--primary); }
+.briefing-caption .lg-red { color: var(--negative); }
+.briefing-caption .lg-blue { color: var(--accent); }
+
+/* ---------- Charts ---------- */
+.chart-card { padding: 8px 10px 4px; }
+.chart-title {
+  font-size: 1rem; font-weight: 600; margin: 10px 12px 0; color: var(--ink);
+}
+
+/* ---------- Footer ---------- */
+.app-footer {
+  max-width: 1120px; margin: 0 auto 40px; padding: 0 24px;
+  font-size: .8rem; color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}

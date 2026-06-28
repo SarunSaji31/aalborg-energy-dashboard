@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+data/*.csv
+.env
+
+# Dev scratch + pipeline backups (latter contains a personal Telegram chatId)
+_dbcheck.out
+_dbcheck.py
+n8n_backup/

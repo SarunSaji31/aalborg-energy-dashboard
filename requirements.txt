@@ -1,0 +1,13 @@
+# Pinned to versions that work on Python 3.14 / numpy 2.5 (arm64 macOS).
+# Two py3.14 gotchas these versions avoid:
+#  - pandas 2.2.x segfaults vs numpy 2.5 (tslibs np_datetime ABI) -> need >=3.0
+#  - dash 2.x dev-tools call pkgutil.find_loader, removed in 3.14 -> need >=3.x
+# (dash 4 bundles a compatible plotly, so plotly is not pinned separately.)
+dash==4.3.0
+pandas==3.0.3
+
+# Live data layer: read from the energy Postgres over the SSH tunnel.
+# Falls back to the CSV snapshot when the DB is unreachable (see load_data()).
+SQLAlchemy==2.0.51
+psycopg[binary]==3.3.4
+python-dotenv==1.2.2
