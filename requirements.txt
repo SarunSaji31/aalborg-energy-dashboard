@@ -11,3 +11,6 @@ pandas==3.0.3
 SQLAlchemy==2.0.51
 psycopg[binary]==3.3.4
 python-dotenv==1.2.2
+
+# Production WSGI server (used by the Docker image; local dev still uses app.run()).
+gunicorn==23.0.0

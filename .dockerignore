@@ -1,0 +1,12 @@
+# Keep the build context small and secret-free.
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+data/*.csv
+n8n_backup
+_dbcheck.out
+_dbcheck.py
+README.md
