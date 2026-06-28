@@ -10,6 +10,8 @@ Styling lives in assets/style.css (Dash auto-loads everything in assets/).
 """
 
 import os
+import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -89,9 +91,26 @@ def load_data() -> tuple[pd.DataFrame, str]:
     return _load_from_csv(), "Snapshot · local CSV"
 
 
-DF, DATA_SOURCE = load_data()
-MIN_DATE = DF.index.min().date()
-MAX_DATE = DF.index.max().date()
+# Loading once at boot froze the dashboard at that moment's data: the n8n
+# pipeline writes the next day's rows to Postgres every night at 22:00, but a
+# long-running gunicorn worker would never see them (so the date picker stayed
+# stuck on the boot day). Cache with a short TTL instead — the first request
+# after the TTL expires re-reads Postgres, and new rows (plus the date-picker
+# bounds derived from them) appear automatically within CACHE_TTL of any write.
+CACHE_TTL = 300  # seconds
+_cache: dict = {"df": None, "source": None, "ts": 0.0}
+_cache_lock = threading.Lock()
+
+
+def get_data() -> tuple[pd.DataFrame, str]:
+    """Cached accessor for the live frame. Refreshes from Postgres once the
+    cached copy is older than CACHE_TTL; otherwise serves the in-memory copy."""
+    now = time.monotonic()
+    with _cache_lock:
+        if _cache["df"] is None or now - _cache["ts"] > CACHE_TTL:
+            _cache["df"], _cache["source"] = load_data()
+            _cache["ts"] = now
+        return _cache["df"], _cache["source"]
 
 # Detail charts default to daily resampling (raw 15-min over long ranges is heavy).
 DEFAULT_RESAMPLE = "D"
@@ -112,7 +131,15 @@ GRAPH_CONFIG = {"displaylogo": False,
 # ----------------------------------------------------------------------------
 # Layout
 # ----------------------------------------------------------------------------
-app.layout = html.Div([
+# A function (not a static value) so Dash re-evaluates it on every page load.
+# That re-reads get_data(), so the date-picker bounds and footer always reflect
+# the latest rows in Postgres without restarting the container.
+def serve_layout():
+    df, source = get_data()
+    min_date = df.index.min().date()
+    max_date = df.index.max().date()
+    n_records = len(df)
+    return html.Div([
     html.Header(className="app-header", children=html.Div(className="inner", children=[
         html.H1([html.Span(className="dot"), "Aalborg DK1 — Power Price & Wind"]),
         html.P("Day-ahead consumer electricity price (DKK/kWh, incl. 25% VAT) and "
@@ -130,10 +157,10 @@ app.layout = html.Div([
                     # One single-day picker drives the whole page.
                     dcc.DatePickerSingle(
                         id="master-date",
-                        min_date_allowed=MIN_DATE,
-                        max_date_allowed=MAX_DATE,
-                        initial_visible_month=MAX_DATE,
-                        date=MAX_DATE,
+                        min_date_allowed=min_date,
+                        max_date_allowed=max_date,
+                        initial_visible_month=max_date,
+                        date=max_date,
                         display_format="DD MMM YYYY",
                     ),
                 ]),
@@ -185,11 +212,14 @@ app.layout = html.Div([
     ]),
 
     html.Footer(className="app-footer", children=[
-        f"Source: energidataservice.dk (DK1) · {DATA_SOURCE} · {len(DF):,} records · "
-        f"{MIN_DATE} – {MAX_DATE}. Recent rows come from a live n8n feed, so "
+        f"Source: energidataservice.dk (DK1) · {source} · {n_records:,} records · "
+        f"{min_date} – {max_date}. Recent rows come from a live n8n feed, so "
         f"coverage thins out after early 2026."
     ]),
-])
+    ])
+
+
+app.layout = serve_layout
 
 
 # ----------------------------------------------------------------------------
@@ -245,9 +275,9 @@ def _as_date(value):
     return pd.Timestamp(value).date() if value else None
 
 
-def _briefing_view(day):
+def _briefing_view(df, day):
     """Briefing window + title for a single selected day (hourly view)."""
-    win = DF.loc[str(day): str(day)]
+    win = df.loc[str(day): str(day)]
     return win, f"Aalborg / DK1 — {day:%a %d %b %Y}"
 
 
@@ -262,10 +292,12 @@ def _briefing_view(day):
     Input("resample", "value"),
 )
 def render(date, rule):
-    day = _as_date(date) or MAX_DATE         # default to latest day if cleared
+    df, _ = get_data()
+    max_date = df.index.max().date()
+    day = _as_date(date) or max_date         # default to latest day if cleared
     mode = "hourly"
 
-    win, title = _briefing_view(day)
+    win, title = _briefing_view(df, day)
 
     if win.empty:
         empty = _empty("No data in this selection.")
