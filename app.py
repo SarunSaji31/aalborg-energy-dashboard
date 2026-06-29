@@ -28,12 +28,14 @@ DB_URL = os.getenv("ENERGY_DB_URL")
 # DK1 consumer price already includes 25% VAT: SpotPriceDKK / 1000 * 1.25.
 PRICE_COL = "price_dkk_kwh"
 WIND_COL = "wind_forecast_mw"
+SOLAR_COL = "solar_forecast_mw"
 
 # Palette mirrors assets/style.css so charts match the page.
 INK = "#1a2230"
 MUTED = "#6b7785"
 PRIMARY = "#1e6f5c"
 ACCENT = "#2f80ed"
+SOLAR = "#f2a900"  # amber — solar forecast line (distinct from the blue wind line)
 NEGATIVE = "#d64545"
 GRID = "#eef1f5"
 FONT = "Inter, -apple-system, Segoe UI, sans-serif"
@@ -41,6 +43,10 @@ FONT = "Inter, -apple-system, Segoe UI, sans-serif"
 
 def _finalize(df: pd.DataFrame) -> pd.DataFrame:
     """Shared shaping so live and snapshot paths return identical frames."""
+    # The frozen CSV snapshot predates the solar column; keep the frame shape
+    # identical so every downstream chart can assume SOLAR_COL exists.
+    if SOLAR_COL not in df.columns:
+        df[SOLAR_COL] = pd.NA
     df = df.set_index("timestamp").sort_index()
     # Timestamps are stored in UTC, but the market day — and the Telegram
     # briefing this dashboard mirrors — run on Europe/Copenhagen wall-clock.
@@ -66,7 +72,7 @@ def _load_from_db() -> pd.DataFrame:
 
     engine = sa.create_engine(DB_URL, connect_args={"connect_timeout": 5})
     query = (
-        f"SELECT timestamp, {PRICE_COL}, {WIND_COL} "
+        f"SELECT timestamp, {PRICE_COL}, {WIND_COL}, {SOLAR_COL} "
         "FROM aalborg_energy_prices ORDER BY timestamp"
     )
     df = pd.read_sql(query, engine, parse_dates=["timestamp"])
@@ -174,7 +180,10 @@ def serve_layout():
                 html.Span("pricier", className="lg lg-red"),
                 " per kWh. The ",
                 html.Span("blue line", className="lg lg-blue"),
-                " is the wind forecast: prices tend to fall when the wind blows.",
+                " is wind and the ",
+                html.Span("amber line", className="lg lg-solar"),
+                " is solar: price tends to fall when wind and solar are high "
+                "(and demand is low) — usually midday.",
             ]),
         ]),
 
@@ -309,6 +318,7 @@ def render(date, rule):
     # --- Briefing summary (top) ---
     avg = win[PRICE_COL].mean()
     avg_wind = win[WIND_COL].mean()
+    avg_solar = win[SOLAR_COL].mean()
     grain = "h" if mode == "hourly" else "D"
     by = win[PRICE_COL].resample(grain).mean().dropna()
     lo_t, lo_v, hi_t, hi_v = by.idxmin(), by.min(), by.idxmax(), by.max()
@@ -319,6 +329,7 @@ def render(date, rule):
                  variant="kpi-neg" if lo_v < 0 else ""),
         kpi_card(f"🔴 Priciest · {hi_t:{stamp}}", f"{hi_v:.2f}", " DKK/kWh"),
         kpi_card("Avg wind", _fmt_wind(avg_wind), " MW", variant="kpi-wind"),
+        kpi_card("Avg solar", _fmt_wind(avg_solar), " MW", variant="kpi-solar"),
     ]
     briefing_fig = _briefing_figure(win, mode)
 
@@ -370,16 +381,18 @@ def _fmt_wind(value) -> str:
 
 
 def _briefing_figure(win: pd.DataFrame, mode: str) -> go.Figure:
-    """Color-graded price bars (green = cheap, red = pricey) with the wind
-    forecast overlaid as a line — reads at a glance, no table needed."""
+    """Color-graded price bars (green = cheap, red = pricey) with the wind and
+    solar forecasts overlaid as lines — reads at a glance, no table needed."""
     rule = "h" if mode == "hourly" else "D"
     fmt = "%H:%M" if mode == "hourly" else "%a %d %b"
-    agg = win.resample(rule).agg({PRICE_COL: "mean", WIND_COL: "mean"})
+    agg = win.resample(rule).agg({PRICE_COL: "mean", WIND_COL: "mean",
+                                  SOLAR_COL: "mean"})
     agg = agg.dropna(subset=[PRICE_COL])
 
     labels = [f"{ts:{fmt}}" for ts in agg.index]
     price = agg[PRICE_COL]
     wind = agg[WIND_COL]
+    solar = agg[SOLAR_COL]
     # Equal min/max (single bar) would break the colour mapping.
     cmin, cmax = price.min(), price.max()
     if cmax == cmin:
@@ -401,6 +414,12 @@ def _briefing_figure(win: pd.DataFrame, mode: str) -> go.Figure:
             yaxis="y2", line=dict(color=ACCENT, width=2.5, shape="spline"),
             hovertemplate="%{x} · %{y:.0f} MW wind<extra></extra>",
         )
+    if solar.notna().any():
+        fig.add_scatter(
+            x=labels, y=solar, name="Solar", mode="lines",
+            yaxis="y2", line=dict(color=SOLAR, width=2.5, shape="spline"),
+            hovertemplate="%{x} · %{y:.0f} MW solar<extra></extra>",
+        )
     fig.update_layout(
         template="plotly_white",
         font=dict(family=FONT, color=INK, size=12),
@@ -409,7 +428,7 @@ def _briefing_figure(win: pd.DataFrame, mode: str) -> go.Figure:
         plot_bgcolor="white", paper_bgcolor="rgba(0,0,0,0)", showlegend=False,
         xaxis=dict(showgrid=False, showline=True, linecolor=GRID),
         yaxis=dict(title="DKK/kWh", gridcolor=GRID, zeroline=True, zerolinecolor=GRID),
-        yaxis2=dict(title="wind MW", overlaying="y", side="right",
+        yaxis2=dict(title="wind / solar MW", overlaying="y", side="right",
                     showgrid=False, rangemode="tozero"),
     )
     return fig

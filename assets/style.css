@@ -11,6 +11,7 @@
   --primary:   #1e6f5c;   /* energy green */
   --primary-d: #16513f;
   --accent:    #2f80ed;   /* wind blue */
+  --solar:     #f2a900;   /* solar amber */
   --negative:  #d64545;   /* sub-zero price */
   --shadow:    0 1px 3px rgba(16, 24, 40, .06), 0 1px 2px rgba(16, 24, 40, .04);
   --radius:    14px;
@@ -92,6 +93,7 @@ body {
 }
 .kpi.kpi-neg::before { background: var(--negative); }
 .kpi.kpi-wind::before { background: var(--accent); }
+.kpi.kpi-solar::before { background: var(--solar); }
 .kpi .kpi-label {
   font-size: .72rem; font-weight: 600; text-transform: uppercase;
   letter-spacing: .05em; color: var(--muted);
@@ -123,6 +125,7 @@ body {
 .briefing-caption .lg-green { color: var(--primary); }
 .briefing-caption .lg-red { color: var(--negative); }
 .briefing-caption .lg-blue { color: var(--accent); }
+.briefing-caption .lg-solar { color: var(--solar); }
 
 /* ---------- Charts ---------- */
 .chart-card { padding: 8px 10px 4px; }
