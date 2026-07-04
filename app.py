@@ -118,8 +118,9 @@ def get_data() -> tuple[pd.DataFrame, str]:
             _cache["ts"] = now
         return _cache["df"], _cache["source"]
 
-# Detail charts default to daily resampling (raw 15-min over long ranges is heavy).
-DEFAULT_RESAMPLE = "D"
+# The page always shows a single day, so hourly is the finest useful default
+# (raw 15-min is available for a closer look).
+DEFAULT_RESAMPLE = "h"
 
 app = Dash(
     __name__,
@@ -198,7 +199,6 @@ def serve_layout():
                     options=[
                         {"label": "Raw (15-min)", "value": "raw"},
                         {"label": "Hourly", "value": "h"},
-                        {"label": "Daily", "value": "D"},
                     ],
                     value=DEFAULT_RESAMPLE,
                     inline=True,
@@ -334,10 +334,7 @@ def render(date, rule):
     briefing_fig = _briefing_figure(win, mode)
 
     # --- Detail charts (bottom) at the chosen resolution ---
-    # Daily resampling of a single day collapses to one point, so fall back to
-    # hourly when the user picks the Daily resolution.
-    eff_rule = "h" if rule == "D" else rule
-    series = _resample(win, eff_rule)
+    series = _resample(win, rule)
     # Plotly.js has no timezone support: a tz-aware x-axis is converted back to
     # UTC for display, which would re-introduce the ~2h shift on these charts.
     # Drop the offset (keeping the local wall-clock) so the axis stays local.
