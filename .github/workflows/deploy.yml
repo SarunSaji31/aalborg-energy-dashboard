@@ -1,0 +1,32 @@
+name: Deploy energy-dash
+
+# Option A: push to main -> CI (test) -> CD (auto-deploy to voxly).
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:                                  # gate: must pass before deploy runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"       # matches the Dockerfile base image
+      - name: Syntax check
+        run: python -m compileall app.py backfill_2026.py
+      - name: Build Docker image       # validates Dockerfile + requirements.txt
+        run: docker build -t energy-dash .
+
+  deploy:
+    needs: ci                          # only deploy if the CI job succeeded
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/energy-dash && git pull && docker build -t energy-dash . && docker stop energy-dash && docker rm energy-dash && docker run -d --name energy-dash --network n8n_internal_energy --restart always --env-file /opt/energy-dash/.env energy-dash && docker network connect my_portfolio_default energy-dash && docker exec nginx_proxy nginx -s reload
