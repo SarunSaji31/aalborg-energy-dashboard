@@ -9,8 +9,8 @@ jobs:
   ci:                                  # gate: must pass before deploy runs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"       # matches the Dockerfile base image
       - name: Syntax check
