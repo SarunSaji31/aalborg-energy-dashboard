@@ -1,13 +1,4 @@
-"""
-Aalborg DK1 Energy Dashboard — Plotly Dash.
-
-Data layer is deliberately isolated in load_data() so the rest of the app
-doesn't care WHERE the data comes from. Step 1 (now): a local CSV snapshot.
-Step 2 (later): swap load_data() to read live from the voxly Postgres over an
-SSH tunnel, or deploy this app on voxly next to the DB. Nothing else changes.
-
-Styling lives in assets/style.css (Dash auto-loads everything in assets/).
-"""
+"""Aalborg DK1 Energy Dashboard — Plotly Dash."""
 
 import os
 import threading
@@ -25,49 +16,37 @@ load_dotenv(Path(__file__).parent / ".env")
 DATA_FILE = Path(__file__).parent / "data" / "energy_prices.csv"
 DB_URL = os.getenv("ENERGY_DB_URL")
 
-# DK1 consumer price already includes 25% VAT: SpotPriceDKK / 1000 * 1.25.
 PRICE_COL = "price_dkk_kwh"
 WIND_COL = "wind_forecast_mw"
 SOLAR_COL = "solar_forecast_mw"
 
-# Palette mirrors assets/style.css so charts match the page.
 INK = "#1a2230"
 MUTED = "#6b7785"
 PRIMARY = "#1e6f5c"
 ACCENT = "#2f80ed"
-SOLAR = "#f2a900"  # amber — solar forecast line (distinct from the blue wind line)
+SOLAR = "#f2a900"
 NEGATIVE = "#d64545"
 GRID = "#eef1f5"
 FONT = "Inter, -apple-system, Segoe UI, sans-serif"
 
 
 def _finalize(df: pd.DataFrame) -> pd.DataFrame:
-    """Shared shaping so live and snapshot paths return identical frames."""
-    # The frozen CSV snapshot predates the solar column; keep the frame shape
-    # identical so every downstream chart can assume SOLAR_COL exists.
-    if SOLAR_COL not in df.columns:
-        df[SOLAR_COL] = pd.NA
     df = df.set_index("timestamp").sort_index()
-    # Timestamps are stored in UTC, but the market day — and the Telegram
-    # briefing this dashboard mirrors — run on Europe/Copenhagen wall-clock.
-    # Convert before any day-slicing or hour labels, else every hour reads ~2h
-    # early (CEST) and the day window is misaligned. Kept tz-aware (not dropped
-    # to naive) so the index stays monotonic across the autumn DST fall-back;
-    # partial-string day slicing and %H:%M formatting honour the index tz.
+
+    # Rows are stored in UTC but the market day runs on Copenhagen wall-clock,
+    # so convert before any day-slicing or hour labels. Kept tz-aware so the
+    # index stays monotonic across the autumn DST fall-back.
     idx = df.index
     if idx.tz is None:
         idx = idx.tz_localize("UTC")
     df.index = idx.tz_convert("Europe/Copenhagen")
-    # day_name / is_weekend in the DB are unreliable (NULL on live rows),
-    # so derive weekday here instead of trusting those columns.
+
     df["weekday"] = df.index.day_name()
     df["is_weekend"] = df.index.dayofweek >= 5
     return df
 
 
 def _load_from_db() -> pd.DataFrame:
-    """Live read from the energy Postgres (postgres_energy on voxly) via the
-    SSH tunnel. Imported lazily so the app still starts without DB libs."""
     import sqlalchemy as sa
 
     engine = sa.create_engine(DB_URL, connect_args={"connect_timeout": 5})
@@ -80,37 +59,28 @@ def _load_from_db() -> pd.DataFrame:
 
 
 def _load_from_csv() -> pd.DataFrame:
-    """Frozen snapshot fallback — keeps the dashboard alive if the tunnel is down."""
     df = pd.read_csv(DATA_FILE, parse_dates=["timestamp"])
     return _finalize(df)
 
 
-def load_data() -> tuple[pd.DataFrame, str]:
-    """Single source of data for the whole app. Tries the live Postgres first,
-    falls back to the CSV snapshot. Returns (frame, source_label)."""
+def load_data() -> tuple[pd.DataFrame, str]:                    #  fallback strategy
     if DB_URL:
         try:
             df = _load_from_db()
             return df, "Live · postgres_energy (voxly)"
-        except Exception as exc:  # tunnel down, DB unreachable, etc.
+        except Exception as exc:
             print(f"[load_data] live DB unavailable ({exc}); using CSV snapshot")
     return _load_from_csv(), "Snapshot · local CSV"
 
 
-# Loading once at boot froze the dashboard at that moment's data: the n8n
-# pipeline writes the next day's rows to Postgres every night at 22:00, but a
-# long-running gunicorn worker would never see them (so the date picker stayed
-# stuck on the boot day). Cache with a short TTL instead — the first request
-# after the TTL expires re-reads Postgres, and new rows (plus the date-picker
-# bounds derived from them) appear automatically within CACHE_TTL of any write.
-CACHE_TTL = 300  # seconds
+CACHE_TTL = 300.           #in-memory cache
 _cache: dict = {"df": None, "source": None, "ts": 0.0}
 _cache_lock = threading.Lock()
 
 
 def get_data() -> tuple[pd.DataFrame, str]:
-    """Cached accessor for the live frame. Refreshes from Postgres once the
-    cached copy is older than CACHE_TTL; otherwise serves the in-memory copy."""
+    # Short TTL, not a one-time boot load: the pipeline writes tomorrow's rows
+    # at 22:00, so a long-lived worker would otherwise never see fresh data.
     now = time.monotonic()
     with _cache_lock:
         if _cache["df"] is None or now - _cache["ts"] > CACHE_TTL:
@@ -118,18 +88,17 @@ def get_data() -> tuple[pd.DataFrame, str]:
             _cache["ts"] = now
         return _cache["df"], _cache["source"]
 
-# The page always shows a single day, so hourly is the finest useful default
-# (raw 15-min is available for a closer look).
-DEFAULT_RESAMPLE = "h"
+
+DEFAULT_RESAMPLE = "h"      #frequency string/default time frequency
 
 app = Dash(
-    __name__,
+    __name__,         #helps Dash locate application resources
     title="Aalborg DK1 Energy",
     external_stylesheets=[
         "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
     ],
 )
-server = app.server  # exposed for gunicorn/Docker later
+server = app.server
 
 GRAPH_CONFIG = {"displaylogo": False,
                 "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"]}
@@ -138,9 +107,8 @@ GRAPH_CONFIG = {"displaylogo": False,
 # ----------------------------------------------------------------------------
 # Layout
 # ----------------------------------------------------------------------------
-# A function (not a static value) so Dash re-evaluates it on every page load.
-# That re-reads get_data(), so the date-picker bounds and footer always reflect
-# the latest rows in Postgres without restarting the container.
+# A function so Dash re-evaluates it per page load and the date-picker bounds
+# and footer always reflect the latest rows.
 def serve_layout():
     df, source = get_data()
     min_date = df.index.min().date()
@@ -154,14 +122,11 @@ def serve_layout():
     ])),
 
     html.Div(className="container", children=[
-        # Daily briefing — same content the Telegram bot sends each night,
-        # presented interactively. One single-day picker drives the whole page.
         html.Div(className="panel briefing", children=[
             html.Div(className="briefing-head", children=[
                 html.Div("📍", className="briefing-pin"),
                 html.Div(id="briefing-title", className="briefing-title"),
                 html.Div(className="briefing-controls", children=[
-                    # One single-day picker drives the whole page.
                     dcc.DatePickerSingle(
                         id="master-date",
                         min_date_allowed=min_date,
@@ -188,8 +153,6 @@ def serve_layout():
             ]),
         ]),
 
-        # Detail resolution — the date selection above drives the whole page;
-        # this only changes how finely the line/area charts below are sampled.
         html.Div(className="panel controls", children=[
             html.Div([
                 html.Label("Detail resolution", className="control-label"),
@@ -206,10 +169,8 @@ def serve_layout():
             ]),
         ]),
 
-        # KPI cards
         html.Div(id="kpis", className="kpi-grid"),
 
-        # Charts
         html.Div(className="panel chart-card", children=[
             html.Div("Electricity price", className="chart-title"),
             dcc.Graph(id="price-chart", config=GRAPH_CONFIG),
@@ -250,7 +211,6 @@ def kpi_card(label, value, unit="", variant=""):
 
 
 def _style(fig: go.Figure) -> go.Figure:
-    """Apply the shared chart theme so figures match the page."""
     fig.update_layout(
         template="plotly_white",
         font=dict(family=FONT, color=INK, size=13),
@@ -278,14 +238,13 @@ def _empty(message: str) -> go.Figure:
 
 
 # ----------------------------------------------------------------------------
-# Unified date selection — one control drives the whole page.
+# One date control drives the whole page.
 # ----------------------------------------------------------------------------
 def _as_date(value):
     return pd.Timestamp(value).date() if value else None
 
 
 def _briefing_view(df, day):
-    """Briefing window + title for a single selected day (hourly view)."""
     win = df.loc[str(day): str(day)]
     return win, f"Aalborg / DK1 — {day:%a %d %b %Y}"
 
@@ -303,7 +262,7 @@ def _briefing_view(df, day):
 def render(date, rule):
     df, _ = get_data()
     max_date = df.index.max().date()
-    day = _as_date(date) or max_date         # default to latest day if cleared
+    day = _as_date(date) or max_date
     mode = "hourly"
 
     win, title = _briefing_view(df, day)
@@ -315,10 +274,11 @@ def render(date, rule):
         return (title, [kpi_card("Average", "—")], empty,
                 dash_kpis, empty, empty)
 
-    # --- Briefing summary (top) ---
     avg = win[PRICE_COL].mean()
     avg_wind = win[WIND_COL].mean()
     avg_solar = win[SOLAR_COL].mean()
+    corr_wind = win[PRICE_COL].corr(win[WIND_COL])
+    corr_solar = win[PRICE_COL].corr(win[SOLAR_COL])
     grain = "h" if mode == "hourly" else "D"
     by = win[PRICE_COL].resample(grain).mean().dropna()
     lo_t, lo_v, hi_t, hi_v = by.idxmin(), by.min(), by.idxmax(), by.max()
@@ -330,14 +290,17 @@ def render(date, rule):
         kpi_card(f"🔴 Priciest · {hi_t:{stamp}}", f"{hi_v:.2f}", " DKK/kWh"),
         kpi_card("Avg wind", _fmt_wind(avg_wind), " MW", variant="kpi-wind"),
         kpi_card("Avg solar", _fmt_wind(avg_solar), " MW", variant="kpi-solar"),
+        kpi_card("Day's wind r", f"{corr_wind:+.2f}" if pd.notna(corr_wind) else "—",
+                 variant="kpi-wind"),
+        kpi_card("Day's solar r", f"{corr_solar:+.2f}" if pd.notna(corr_solar) else "—",
+                 variant="kpi-solar"),
     ]
     briefing_fig = _briefing_figure(win, mode)
 
-    # --- Detail charts (bottom) at the chosen resolution ---
     series = _resample(win, rule)
-    # Plotly.js has no timezone support: a tz-aware x-axis is converted back to
-    # UTC for display, which would re-introduce the ~2h shift on these charts.
-    # Drop the offset (keeping the local wall-clock) so the axis stays local.
+
+    # Plotly.js has no timezone support and would push a tz-aware axis back to
+    # UTC, so drop the offset (keeping local wall-clock) before plotting.
     if series.index.tz is not None:
         series = series.tz_localize(None)
     min_price, max_price = win[PRICE_COL].min(), win[PRICE_COL].max()
@@ -371,15 +334,13 @@ def render(date, rule):
 
 
 # ----------------------------------------------------------------------------
-# Daily briefing — mirrors the Telegram night-briefing the n8n pipeline sends.
+# Daily briefing — mirrors the Telegram night-briefing the pipeline sends.
 # ----------------------------------------------------------------------------
 def _fmt_wind(value) -> str:
     return f"{value:.0f}" if pd.notna(value) else "—"
 
 
 def _briefing_figure(win: pd.DataFrame, mode: str) -> go.Figure:
-    """Color-graded price bars (green = cheap, red = pricey) with the wind and
-    solar forecasts overlaid as lines — reads at a glance, no table needed."""
     rule = "h" if mode == "hourly" else "D"
     fmt = "%H:%M" if mode == "hourly" else "%a %d %b"
     agg = win.resample(rule).agg({PRICE_COL: "mean", WIND_COL: "mean",
@@ -390,7 +351,8 @@ def _briefing_figure(win: pd.DataFrame, mode: str) -> go.Figure:
     price = agg[PRICE_COL]
     wind = agg[WIND_COL]
     solar = agg[SOLAR_COL]
-    # Equal min/max (single bar) would break the colour mapping.
+
+    # A single bar (min == max) would collapse the colour scale.
     cmin, cmax = price.min(), price.max()
     if cmax == cmin:
         cmax = cmin + 0.01
